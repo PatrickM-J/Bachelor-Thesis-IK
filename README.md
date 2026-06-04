@@ -24,4 +24,17 @@ SLURM job files (Habrok HPC cluster):
 - verify_cascade.slurm: smoke test that the classifier weights load and run
 
 Model Notebooks:
-- psych_distance_pipeline
+- psych_distance_pipeline.ipynb: the two encoder-based models. Set MODEL_KEY = 'deberta' for microsoft/deberta-v3-base or MODEL_KEY = 'sbert' for sentence-transformers/all-mpnet-base-v2, then run the notebook once per model. Covers both stages (salience + dimension classification).
+- gemma_pipeline.ipynb: the generative LLM (google/gemma-3-1b-it), prompted few-shot rather than fine-tuned. Requires a Hugging Face token (Gemma is a gated model) — see Setup below.
+
+Statistical analysis:
+- clt_regression.Rmd: the mixed-effects logistic regression, descriptive comparison, odds ratios, collinearity check, and the classifier-error sensitivity analysis. This is the source of truth for the analysis.
+- clt_regression.pdf: knitted output of the above file, as a convenience record. Generated from the .Rmd file.
+
+Provenance:
+- consort/: JSON counts for documenting the sample funnel (selection counts, aggregate counts, stage-3 counts) for the CONSORT-style flow
+
+Not included:
+- Model weights for the shared BERT cascade. These can be found in the peer_handoff found on the Github release from Kris: https://github.com/KrisHoffmann/Bachelor-Thesis-IK/releases/tag/v1.0-peer-handoff
+- The raw Webis-CMV-20 corpus: available here: https://zenodo.org/records/3778298
+- The segmented comment file and the per-sentence prediction shards: regenerate by running the prep scripts and then the cascade.
