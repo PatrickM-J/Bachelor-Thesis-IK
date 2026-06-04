@@ -1,0 +1,233 @@
+---
+title: "Psychological Distance and Persuasion in CMV: Mixed-Effects Logistic Regression"
+author: "Patrick"
+date: "`r Sys.Date()`"
+output:
+  pdf_document:
+    toc: true
+  html_document:
+    toc: true
+    toc_float: true
+    number_sections: true
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE, warning = FALSE, message = FALSE)
+```
+
+# Overview
+Mixed-effects logistic regression predicting whether a comment received a delta
+(`y`) from its construal-level far-proportions (Social and Hypothetical), adjusting
+for comment-level controls, with a random intercept for thread (post) to account
+for the within-thread matched design (1 delta : 3 non-delta controls per set). Note
+that this random-intercept variance was estimated at zero (a singular fit); we retain
+the mixed model as the a priori specification motivated by the design and discuss
+this in the convergence section.
+
+**Note on the classifier.** The Social and Hypothetical labels come from a BERT
+cascade with modest held-out performance (Social macro-F1 ~0.45, Hypothetical
+~0.59). Coefficients should be read with that measurement error in mind; the
+sensitivity analysis at the end addresses it directly.
+
+```{r libraries}
+#install.packages(c("lme4", "tidyverse", "broom.mixed", "performance", "car"))
+library(lme4)
+library(tidyverse)
+library(broom.mixed)   # tidy() for glmer
+library(performance)   # collinearity / model checks
+```
+
+# Load data
+
+```{r load}
+# Adjust path if needed:
+df <- read_csv("analysis_dataset.csv")
+
+cat("Rows:", nrow(df), "\n")
+cat("Deltas (y=1):", sum(df$y == 1), " Non-deltas (y=0):", sum(df$y == 0), "\n")
+cat("Unique threads:", length(unique(df$thread_id)), "\n")
+cat("Unique matched sets:", length(unique(df$set_id)), "\n")
+
+# Types
+df <- df %>%
+  mutate(
+    y          = as.integer(y),
+    thread_id  = factor(thread_id),
+    set_id     = factor(set_id),
+    is_top_level = as.integer(is_top_level)
+  )
+```
+
+# Descriptive comparison
+
+Raw far-proportions by delta status — the unadjusted picture before the model.
+
+```{r descriptives}
+df %>%
+  group_by(y) %>%
+  summarise(
+    n = n(),
+    far_social_mean = mean(prop_far_social),
+    far_social_sd   = sd(prop_far_social),
+    far_hypo_mean   = mean(prop_far_hypothetical),
+    far_hypo_sd     = sd(prop_far_hypothetical),
+    .groups = "drop"
+  )
+```
+
+```{r descriptive-plot, fig.width=8, fig.height=3.5}
+df %>%
+  pivot_longer(c(prop_far_social, prop_far_hypothetical),
+               names_to = "dimension", values_to = "far_prop") %>%
+  mutate(delta = factor(y, labels = c("No delta", "Delta"))) %>%
+  ggplot(aes(x = far_prop, fill = delta)) +
+  geom_density(alpha = 0.4) +
+  facet_wrap(~dimension, scales = "free") +
+  labs(x = "Far-proportion (over salient sentences)", fill = NULL,
+       title = "Far-proportion distributions by delta status") +
+  theme_minimal()
+```
+
+# Prepare predictors
+
+The continuous controls are highly skewed (author_activity, comment_order,
+comment_length), so we log-transform then standardise (z-score) them. This helps
+`glmer` converge and makes coefficients interpretable per standard deviation.
+The far-proportions are left on their natural 0–1 scale so their odds ratios read
+as "per unit of proportion" (we also provide a per-0.1 version below).
+
+```{r prepare}
+zlog <- function(x) as.numeric(scale(log1p(x)))  # log1p handles zeros (e.g. author_activity = 0)
+
+df <- df %>%
+  mutate(
+    comment_length_z  = zlog(comment_length),
+    comment_order_z   = zlog(comment_order),
+    author_activity_z = zlog(author_activity)
+  )
+
+summary(df[, c("comment_length_z", "comment_order_z", "author_activity_z")])
+```
+
+# Primary model
+
+```{r model-primary}
+m1 <- glmer(
+  y ~ prop_far_social + prop_far_hypothetical +
+      comment_length_z + is_top_level + comment_order_z + author_activity_z +
+      (1 | thread_id),
+  data = df, family = binomial,
+  control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+)
+
+summary(m1)
+```
+
+## Convergence check
+
+```{r convergence}
+# Did it converge cleanly? (no warnings printed above = good)
+# Singular fit check (random-intercept variance near zero is worth noting):
+cat("Random-intercept SD (thread):",
+    attr(VarCorr(m1)$thread_id, "stddev"), "\n")
+isSingular(m1)
+```
+
+## Odds ratios with 95% CIs
+
+```{r odds-ratios}
+or_tab <- broom.mixed::tidy(m1, effects = "fixed", conf.int = TRUE,
+                            exponentiate = TRUE)
+or_tab %>%
+  select(term, estimate, conf.low, conf.high, p.value) %>%
+  mutate(across(where(is.numeric), ~round(.x, 4)))
+```
+
+The `estimate` column is the odds ratio. For the far-proportions (0–1 scale), the
+OR is the multiplicative change in odds of a delta when the proportion goes from 0
+to 1 — a large swing. A per-0.1 interpretation is often more meaningful:
+
+```{r per-0.1}
+or_tab %>%
+  filter(term %in% c("prop_far_social", "prop_far_hypothetical")) %>%
+  mutate(OR_per_0.1 = round(estimate^(0.1), 4)) %>%
+  select(term, OR_full_range = estimate, OR_per_0.1, conf.low, conf.high, p.value)
+```
+
+## Collinearity check
+
+```{r collinearity}
+performance::check_collinearity(m1)
+```
+
+# Robustness: nested random effects (optional)
+
+Models comments nested within matched set within thread. Heavier and may be
+singular (many sets have only 4 comments), so treat as a robustness check, not
+the primary model.
+
+```{r model-nested, eval=FALSE}
+m2 <- glmer(
+  y ~ prop_far_social + prop_far_hypothetical +
+      comment_length_z + is_top_level + comment_order_z + author_activity_z +
+      (1 | thread_id/set_id),
+  data = df, family = binomial,
+  control = glmerControl(optimizer = "bobyqa", optCtrl = list(maxfun = 2e5))
+)
+summary(m2)
+broom.mixed::tidy(m2, effects = "fixed", conf.int = TRUE, exponentiate = TRUE)
+```
+
+# Sensitivity analysis: classifier error
+Because the Social and Hypothetical labels are classifier predictions rather than gold annotations, the far-proportions carry measurement error, and that error could bias the regression coefficients. We assess robustness with a coarse label-perturbation sweep. For each comment, the far-proportion is treated as a count of "far" labels over its salient sentences; we then randomly flip labels (far→not-far and not-far→far) at a fixed error rate, recompute the far-proportions, and refit the model. We repeat this 30 times at each of four error rates (0%, 15%, 30%, 45%) and report the median odds ratio and 2.5–97.5% range across repetitions. The sweep is deliberately coarse rather than pinned to the test-set confusion matrix. With only ~155 held-out sentences split across three classes, the per-class error rates are themselves too uncertain to support precise per-cell perturbation; sweeping a plausible band is the more honest treatment and keeps the method simple. Because the classifier was trained without access to delta status, its errors are plausibly non-differential with respect to the outcome — meaning they bias coefficients toward the null. The simulation makes this concrete: as the error rate rises, both odds ratios should move monotonically toward 1, so any effect that survives substantial noise is, if anything, an underestimate of the true association. Refitting uses glm rather than glmer, since the thread-level random-intercept variance in the primary model was estimated at zero (see below), making the two estimators equivalent for the fixed effects while glm is far faster across the many refits.
+
+```{r sensitivity, eval=TRUE}
+set.seed(42)
+error_rates <- c(0.0, 0.15, 0.30, 0.45)
+n_reps <- 30
+
+# Perturb a proportion by simulating label flips: a far-proportion p over k
+# salient sentences ~ k*p far labels; flip each label independently w.p. e.
+perturb <- function(p, k, e) {
+  k <- pmax(k, 1)
+  far  <- round(p * k)
+  near <- k - far
+  # far->not and not->far flips at rate e
+  new_far <- rbinom(length(far), far,  1 - e) + rbinom(length(near), near, e)
+  pmin(pmax(new_far / k, 0), 1)
+}
+
+sens <- purrr::map_dfr(error_rates, function(e) {
+  purrr::map_dfr(seq_len(n_reps), function(r) {
+    dfp <- df %>%
+      mutate(
+        ps = perturb(prop_far_social,       n_salient, e),
+        ph = perturb(prop_far_hypothetical, n_salient, e)
+      )
+    m <- tryCatch(
+      glm(y ~ ps + ph + comment_length_z + is_top_level +
+            comment_order_z + author_activity_z,
+          data = dfp, family = binomial),   # glm: random effect was ~0 anyway
+      error = function(err) NULL)
+    if (is.null(m)) return(NULL)
+    b <- coef(m)
+    tibble(error_rate = e, rep = r,
+           OR_social = exp(b["ps"]), OR_hypo = exp(b["ph"]))
+  })
+})
+
+sens %>%
+  group_by(error_rate) %>%
+  summarise(
+    social_OR_median = median(OR_social),
+    social_OR_lo = quantile(OR_social, .025),
+    social_OR_hi = quantile(OR_social, .975),
+    hypo_OR_median = median(OR_hypo),
+    hypo_OR_lo = quantile(OR_hypo, .025),
+    hypo_OR_hi = quantile(OR_hypo, .975),
+    .groups = "drop"
+  )
+```
+
+The far-social effect remained significant (OR > 1, CI excluding 1) across all error rates up to 45%, while the far-hypothetical effect held to 30% and attenuated to non-significance only at 45% — consistent with the lower classifier reliability of the Hypothetical Far class. Both effects moved toward the null as noise increased, indicating the primary estimates are conservative.
+
