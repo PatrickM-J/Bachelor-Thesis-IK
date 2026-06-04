@@ -1,0 +1,12 @@
+{
+  "comments_after_salience_filter": 125929,
+  "sets_kept": 20469,
+  "sets_dropped_no_surviving_delta": 1488,
+  "sets_dropped_insufficient_controls": 1257,
+  "final_rows": 81876,
+  "final_deltas": 20469,
+  "final_nondeltas": 61407,
+  "min_salient": 3,
+  "keep": 3,
+  "seed": 42
+}

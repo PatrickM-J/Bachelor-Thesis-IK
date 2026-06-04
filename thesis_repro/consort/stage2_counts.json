@@ -1,0 +1,15 @@
+{
+  "input_to_filter": 3646078,
+  "removed_bots": 62337,
+  "after_bots": 3583741,
+  "removed_self_deltas": 1,
+  "after_self_deltas": 3583740,
+  "removed_award_gestures": 31055,
+  "after_award_gestures": 3552685,
+  "removed_deleted_or_removed": 255062,
+  "after_deleted_removed": 3297623,
+  "removed_short": 566803,
+  "after_short": 2730820,
+  "removed_quote_only": 2518,
+  "after_quote_only": 2728302
+}

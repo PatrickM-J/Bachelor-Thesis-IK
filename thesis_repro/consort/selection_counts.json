@@ -1,0 +1,10 @@
+{
+  "total_comments_scanned": 2728302,
+  "sets_formed": 23219,
+  "deltas_dropped_insufficient_pool": 1557,
+  "comments_selected_for_classification": 160418,
+  "min_sents_proxy": 3,
+  "oversample": 6,
+  "keep_final": 3,
+  "seed": 42
+}
